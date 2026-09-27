@@ -1,10 +1,9 @@
 const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes } = require('discord.js');
 const mongoose = require('mongoose');
 
-// Biến môi trường trên Render
 const BOT_TOKEN = process.env.DISCORD_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
-const MONGO_URI = process.env.MONGO_URI; // Link MongoDB của bạn
+const MONGO_URI = process.env.MONGO_URI;
 
 const client = new Client({
     intents: [
@@ -13,7 +12,7 @@ const client = new Client({
     ]
 });
 
-// 1. Tạo Schema / Model lưu vào Database MongoDB
+// Schema Database
 const configSchema = new mongoose.Schema({
     guildId: { type: String, required: true, unique: true },
     welcome: {
@@ -35,16 +34,19 @@ const configSchema = new mongoose.Schema({
 
 const Config = mongoose.model('Config', configSchema);
 
-// Hàm lấy hoặc tạo mới Cấu hình Server từ Database
 async function getConfig(guildId) {
-    let data = await Config.findOne({ guildId });
-    if (!data) {
-        data = await Config.create({ guildId });
+    try {
+        let data = await Config.findOne({ guildId });
+        if (!data) {
+            data = await Config.create({ guildId });
+        }
+        return data;
+    } catch (error) {
+        console.error('Lỗi lấy dữ liệu MongoDB:', error);
+        return null;
     }
-    return data;
 }
 
-// 2. Khai báo Slash Commands
 const commands = [
     new SlashCommandBuilder()
         .setName('set-welcome')
@@ -80,33 +82,6 @@ const commands = [
         .setDescription('👑 [Owner Only] Xem trước tin nhắn Boost Server')
 ];
 
-client.once('ready', async () => {
-    console.log(`🤖 Bot đã chạy thành công: ${client.user.tag}`);
-
-    // Kết nối Cơ sở dữ liệu MongoDB
-    if (MONGO_URI) {
-        try {
-            await mongoose.connect(MONGO_URI);
-            console.log('🍃 Đã kết nối thành công với MongoDB (Dữ liệu lưu vĩnh viễn)!');
-        } catch (err) {
-            console.error('❌ Lỗi kết nối MongoDB:', err);
-        }
-    } else {
-        console.error('❌ Thiếu biến MONGO_URI trong Environment Variables!');
-    }
-    
-    if (!BOT_TOKEN) return console.error('❌ Chưa thiết lập DISCORD_TOKEN!');
-
-    const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
-    try {
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('✅ Đã đăng ký thành công Slash Commands!');
-    } catch (err) {
-        console.error('Lỗi khi đăng ký lệnh:', err);
-    }
-});
-
-// Hàm hỗ trợ tạo Embed
 function createEmbed(text, gifUrl, member, color = '#2B2D31') {
     const guild = member.guild;
     const totalBoosts = guild.premiumSubscriptionCount || 0;
@@ -123,7 +98,7 @@ function createEmbed(text, gifUrl, member, color = '#2B2D31') {
         .setImage(gifUrl || null);
 }
 
-// 3. Xử lý Lệnh Slash Command
+// Lệnh Interaction với deferReply chống lỗi "ứng dụng không phản hồi"
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -131,15 +106,22 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: '❌ Lệnh này chỉ dành riêng cho **Chủ Bot**!', ephemeral: true });
     }
 
+    // Hoãn phản hồi để Discord chờ bot xử lý Database
+    await interaction.deferReply({ ephemeral: true });
+
     const { commandName, options, member, guildId } = interaction;
     const db = await getConfig(guildId);
+
+    if (!db) {
+        return interaction.editReply({ content: '❌ Lỗi kết nối Database! Hãy kiểm tra lại MONGO_URI trên Render.' });
+    }
 
     if (commandName === 'set-welcome') {
         db.welcome.channelId = options.getChannel('channel').id;
         db.welcome.gifUrl = options.getString('gif');
         if (options.getString('message')) db.welcome.message = options.getString('message');
         await db.save();
-        await interaction.reply({ content: `✅ Đã lưu cài đặt Welcome vĩnh viễn tại <#${db.welcome.channelId}>!`, ephemeral: true });
+        await interaction.editReply({ content: `✅ Đã lưu cài đặt Welcome vĩnh viễn tại <#${db.welcome.channelId}>!` });
     }
 
     if (commandName === 'set-goodbye') {
@@ -147,7 +129,7 @@ client.on('interactionCreate', async (interaction) => {
         db.goodbye.gifUrl = options.getString('gif');
         if (options.getString('message')) db.goodbye.message = options.getString('message');
         await db.save();
-        await interaction.reply({ content: `✅ Đã lưu cài đặt Goodbye vĩnh viễn tại <#${db.goodbye.channelId}>!`, ephemeral: true });
+        await interaction.editReply({ content: `✅ Đã lưu cài đặt Goodbye vĩnh viễn tại <#${db.goodbye.channelId}>!` });
     }
 
     if (commandName === 'set-boost') {
@@ -155,33 +137,32 @@ client.on('interactionCreate', async (interaction) => {
         db.boost.gifUrl = options.getString('gif');
         if (options.getString('message')) db.boost.message = options.getString('message');
         await db.save();
-        await interaction.reply({ content: `✅ Đã lưu cài đặt Boost vĩnh viễn tại <#${db.boost.channelId}>!`, ephemeral: true });
+        await interaction.editReply({ content: `✅ Đã lưu cài đặt Boost vĩnh viễn tại <#${db.boost.channelId}>!` });
     }
 
-    // Lệnh Test
     if (commandName === 'test-welcome') {
-        if (!db.welcome.gifUrl) return interaction.reply({ content: '❌ Hãy cài `/set-welcome` trước!', ephemeral: true });
+        if (!db.welcome.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-welcome` trước!' });
         const embed = createEmbed(db.welcome.message, db.welcome.gifUrl, member);
-        await interaction.reply({ content: '🧪 **Bản xem trước Welcome:**', embeds: [embed], ephemeral: true });
+        await interaction.editReply({ content: '🧪 **Bản xem trước Welcome:**', embeds: [embed] });
     }
 
     if (commandName === 'test-goodbye') {
-        if (!db.goodbye.gifUrl) return interaction.reply({ content: '❌ Hãy cài `/set-goodbye` trước!', ephemeral: true });
+        if (!db.goodbye.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-goodbye` trước!' });
         const embed = createEmbed(db.goodbye.message, db.goodbye.gifUrl, member);
-        await interaction.reply({ content: '🧪 **Bản xem trước Goodbye:**', embeds: [embed], ephemeral: true });
+        await interaction.editReply({ content: '🧪 **Bản xem trước Goodbye:**', embeds: [embed] });
     }
 
     if (commandName === 'test-boost') {
-        if (!db.boost.gifUrl) return interaction.reply({ content: '❌ Hãy cài `/set-boost` trước!', ephemeral: true });
+        if (!db.boost.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-boost` trước!' });
         const embed = createEmbed(db.boost.message, db.boost.gifUrl, member, '#F47FFF');
-        await interaction.reply({ content: '🧪 **Bản xem trước Boost:**', embeds: [embed], ephemeral: true });
+        await interaction.editReply({ content: '🧪 **Bản xem trước Boost:**', embeds: [embed] });
     }
 });
 
-// Sự kiện Welcome
+// Auto Events
 client.on('guildMemberAdd', async (member) => {
     const db = await getConfig(member.guild.id);
-    if (!db.welcome.channelId) return;
+    if (!db || !db.welcome.channelId) return;
     const channel = member.guild.channels.cache.get(db.welcome.channelId);
     if (!channel) return;
 
@@ -189,10 +170,9 @@ client.on('guildMemberAdd', async (member) => {
     await channel.send({ embeds: [embed] });
 });
 
-// Sự kiện Goodbye
 client.on('guildMemberRemove', async (member) => {
     const db = await getConfig(member.guild.id);
-    if (!db.goodbye.channelId) return;
+    if (!db || !db.goodbye.channelId) return;
     const channel = member.guild.channels.cache.get(db.goodbye.channelId);
     if (!channel) return;
 
@@ -200,10 +180,9 @@ client.on('guildMemberRemove', async (member) => {
     await channel.send({ embeds: [embed] });
 });
 
-// Sự kiện Boost Server
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
     const db = await getConfig(newMember.guild.id);
-    if (!db.boost.channelId) return;
+    if (!db || !db.boost.channelId) return;
 
     const oldStatus = oldMember.premiumSince;
     const newStatus = newMember.premiumSince;
@@ -217,4 +196,31 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     }
 });
 
-client.login(BOT_TOKEN);
+// Kết nối DB trước rồi mới chạy Bot
+async function start() {
+    if (!MONGO_URI) return console.error('❌ Thiếu biến MONGO_URI!');
+    if (!BOT_TOKEN) return console.error('❌ Thiếu biến DISCORD_TOKEN!');
+
+    try {
+        console.log('⏳ Đang kết nối MongoDB...');
+        await mongoose.connect(MONGO_URI);
+        console.log('🍃 Đã kết nối thành công MongoDB!');
+
+        client.once('ready', async () => {
+            console.log(`🤖 Bot đã chạy: ${client.user.tag}`);
+            const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
+            try {
+                await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+                console.log('✅ Đã đăng ký Slash Commands!');
+            } catch (err) {
+                console.error('Lỗi đăng ký Slash Commands:', err);
+            }
+        });
+
+        await client.login(BOT_TOKEN);
+    } catch (err) {
+        console.error('❌ Không thể kết nối MongoDB:', err.message);
+    }
+}
+
+start();

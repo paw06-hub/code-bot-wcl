@@ -5,6 +5,9 @@ const BOT_TOKEN = process.env.DISCORD_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 const MONGO_URI = process.env.MONGO_URI;
 
+// Tắt buffering để tránh bị treo lệnh khi DB gián đoạn
+mongoose.set('bufferCommands', false);
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -34,7 +37,9 @@ const configSchema = new mongoose.Schema({
 
 const Config = mongoose.model('Config', configSchema);
 
+// Hàm lấy dữ liệu an toàn
 async function getConfig(guildId) {
+    if (mongoose.connection.readyState !== 1) return null;
     try {
         let data = await Config.findOne({ guildId });
         if (!data) {
@@ -42,11 +47,12 @@ async function getConfig(guildId) {
         }
         return data;
     } catch (error) {
-        console.error('Lỗi lấy dữ liệu MongoDB:', error);
+        console.error('Lỗi thao tác MongoDB:', error);
         return null;
     }
 }
 
+// Danh sách Slash Commands
 const commands = [
     new SlashCommandBuilder()
         .setName('set-welcome')
@@ -98,64 +104,69 @@ function createEmbed(text, gifUrl, member, color = '#2B2D31') {
         .setImage(gifUrl || null);
 }
 
-// Lệnh Interaction với deferReply chống lỗi "ứng dụng không phản hồi"
+// Xử lý tất cả các Interaction
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    if (OWNER_ID && interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: '❌ Lệnh này chỉ dành riêng cho **Chủ Bot**!', ephemeral: true });
-    }
-
-    // Hoãn phản hồi để Discord chờ bot xử lý Database
+    // Phản hồi ngay lập tức để Discord không báo lỗi "không phản hồi"
     await interaction.deferReply({ ephemeral: true });
+
+    if (OWNER_ID && interaction.user.id !== OWNER_ID) {
+        return interaction.editReply({ content: '❌ Lệnh này chỉ dành riêng cho **Chủ Bot**!' });
+    }
 
     const { commandName, options, member, guildId } = interaction;
     const db = await getConfig(guildId);
 
     if (!db) {
-        return interaction.editReply({ content: '❌ Lỗi kết nối Database! Hãy kiểm tra lại MONGO_URI trên Render.' });
+        return interaction.editReply({ content: '❌ MongoDB chưa kết nối xong hoặc gặp lỗi. Vui lòng kiểm tra lại biến `MONGO_URI` trên Render!' });
     }
 
-    if (commandName === 'set-welcome') {
-        db.welcome.channelId = options.getChannel('channel').id;
-        db.welcome.gifUrl = options.getString('gif');
-        if (options.getString('message')) db.welcome.message = options.getString('message');
-        await db.save();
-        await interaction.editReply({ content: `✅ Đã lưu cài đặt Welcome vĩnh viễn tại <#${db.welcome.channelId}>!` });
-    }
+    try {
+        if (commandName === 'set-welcome') {
+            db.welcome.channelId = options.getChannel('channel').id;
+            db.welcome.gifUrl = options.getString('gif');
+            if (options.getString('message')) db.welcome.message = options.getString('message');
+            await db.save();
+            await interaction.editReply({ content: `✅ Đã lưu cài đặt Welcome vĩnh viễn tại <#${db.welcome.channelId}>!` });
+        }
 
-    if (commandName === 'set-goodbye') {
-        db.goodbye.channelId = options.getChannel('channel').id;
-        db.goodbye.gifUrl = options.getString('gif');
-        if (options.getString('message')) db.goodbye.message = options.getString('message');
-        await db.save();
-        await interaction.editReply({ content: `✅ Đã lưu cài đặt Goodbye vĩnh viễn tại <#${db.goodbye.channelId}>!` });
-    }
+        else if (commandName === 'set-goodbye') {
+            db.goodbye.channelId = options.getChannel('channel').id;
+            db.goodbye.gifUrl = options.getString('gif');
+            if (options.getString('message')) db.goodbye.message = options.getString('message');
+            await db.save();
+            await interaction.editReply({ content: `✅ Đã lưu cài đặt Goodbye vĩnh viễn tại <#${db.goodbye.channelId}>!` });
+        }
 
-    if (commandName === 'set-boost') {
-        db.boost.channelId = options.getChannel('channel').id;
-        db.boost.gifUrl = options.getString('gif');
-        if (options.getString('message')) db.boost.message = options.getString('message');
-        await db.save();
-        await interaction.editReply({ content: `✅ Đã lưu cài đặt Boost vĩnh viễn tại <#${db.boost.channelId}>!` });
-    }
+        else if (commandName === 'set-boost') {
+            db.boost.channelId = options.getChannel('channel').id;
+            db.boost.gifUrl = options.getString('gif');
+            if (options.getString('message')) db.boost.message = options.getString('message');
+            await db.save();
+            await interaction.editReply({ content: `✅ Đã lưu cài đặt Boost vĩnh viễn tại <#${db.boost.channelId}>!` });
+        }
 
-    if (commandName === 'test-welcome') {
-        if (!db.welcome.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-welcome` trước!' });
-        const embed = createEmbed(db.welcome.message, db.welcome.gifUrl, member);
-        await interaction.editReply({ content: '🧪 **Bản xem trước Welcome:**', embeds: [embed] });
-    }
+        else if (commandName === 'test-welcome') {
+            if (!db.welcome.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-welcome` trước!' });
+            const embed = createEmbed(db.welcome.message, db.welcome.gifUrl, member);
+            await interaction.editReply({ content: '🧪 **Bản xem trước Welcome:**', embeds: [embed] });
+        }
 
-    if (commandName === 'test-goodbye') {
-        if (!db.goodbye.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-goodbye` trước!' });
-        const embed = createEmbed(db.goodbye.message, db.goodbye.gifUrl, member);
-        await interaction.editReply({ content: '🧪 **Bản xem trước Goodbye:**', embeds: [embed] });
-    }
+        else if (commandName === 'test-goodbye') {
+            if (!db.goodbye.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-goodbye` trước!' });
+            const embed = createEmbed(db.goodbye.message, db.goodbye.gifUrl, member);
+            await interaction.editReply({ content: '🧪 **Bản xem trước Goodbye:**', embeds: [embed] });
+        }
 
-    if (commandName === 'test-boost') {
-        if (!db.boost.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-boost` trước!' });
-        const embed = createEmbed(db.boost.message, db.boost.gifUrl, member, '#F47FFF');
-        await interaction.editReply({ content: '🧪 **Bản xem trước Boost:**', embeds: [embed] });
+        else if (commandName === 'test-boost') {
+            if (!db.boost.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-boost` trước!' });
+            const embed = createEmbed(db.boost.message, db.boost.gifUrl, member, '#F47FFF');
+            await interaction.editReply({ content: '🧪 **Bản xem trước Boost:**', embeds: [embed] });
+        }
+    } catch (err) {
+        console.error('Lỗi khi chạy lệnh:', err);
+        await interaction.editReply({ content: '❌ Có lỗi xảy ra khi lưu vào Database!' });
     }
 });
 
@@ -196,7 +207,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     }
 });
 
-// Kết nối DB trước rồi mới chạy Bot
+// Quy trình khởi động chuẩn
 async function start() {
     if (!MONGO_URI) return console.error('❌ Thiếu biến MONGO_URI!');
     if (!BOT_TOKEN) return console.error('❌ Thiếu biến DISCORD_TOKEN!');
@@ -211,7 +222,7 @@ async function start() {
             const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
             try {
                 await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-                console.log('✅ Đã đăng ký Slash Commands!');
+                console.log('✅ Đã đăng ký thành công Slash Commands!');
             } catch (err) {
                 console.error('Lỗi đăng ký Slash Commands:', err);
             }
@@ -219,7 +230,7 @@ async function start() {
 
         await client.login(BOT_TOKEN);
     } catch (err) {
-        console.error('❌ Không thể kết nối MongoDB:', err.message);
+        console.error('❌ Lỗi kết nối MongoDB:', err.message);
     }
 }
 

@@ -1,11 +1,21 @@
-const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes, MessageFlags } = require('discord.js');
 const mongoose = require('mongoose');
+const http = require('http');
 
+// 1. Mở Port Web Server cho Render không bị ngắt Service
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Bot Khách Sạn 24/7 đang hoạt động bình thường!');
+}).listen(PORT, () => {
+    console.log(`🌐 Web Server đã mở tại port ${PORT}`);
+});
+
+// Biến môi trường
 const BOT_TOKEN = process.env.DISCORD_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 const MONGO_URI = process.env.MONGO_URI;
 
-// Tắt buffering để tránh bị treo lệnh khi DB gián đoạn
 mongoose.set('bufferCommands', false);
 
 const client = new Client({
@@ -15,7 +25,7 @@ const client = new Client({
     ]
 });
 
-// Schema Database
+// 2. Schema Database
 const configSchema = new mongoose.Schema({
     guildId: { type: String, required: true, unique: true },
     welcome: {
@@ -37,7 +47,6 @@ const configSchema = new mongoose.Schema({
 
 const Config = mongoose.model('Config', configSchema);
 
-// Hàm lấy dữ liệu an toàn
 async function getConfig(guildId) {
     if (mongoose.connection.readyState !== 1) return null;
     try {
@@ -52,7 +61,7 @@ async function getConfig(guildId) {
     }
 }
 
-// Danh sách Slash Commands
+// 3. Slash Commands
 const commands = [
     new SlashCommandBuilder()
         .setName('set-welcome')
@@ -104,12 +113,11 @@ function createEmbed(text, gifUrl, member, color = '#2B2D31') {
         .setImage(gifUrl || null);
 }
 
-// Xử lý tất cả các Interaction
+// 4. Xử lý Interaction (Dùng MessageFlags.Ephemeral chuẩn discord.js v14 mới nhất)
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    // Phản hồi ngay lập tức để Discord không báo lỗi "không phản hồi"
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (OWNER_ID && interaction.user.id !== OWNER_ID) {
         return interaction.editReply({ content: '❌ Lệnh này chỉ dành riêng cho **Chủ Bot**!' });
@@ -119,7 +127,7 @@ client.on('interactionCreate', async (interaction) => {
     const db = await getConfig(guildId);
 
     if (!db) {
-        return interaction.editReply({ content: '❌ MongoDB chưa kết nối xong hoặc gặp lỗi. Vui lòng kiểm tra lại biến `MONGO_URI` trên Render!' });
+        return interaction.editReply({ content: '❌ MongoDB chưa kết nối xong! Vui lòng thử lại sau vài giây.' });
     }
 
     try {
@@ -165,8 +173,8 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.editReply({ content: '🧪 **Bản xem trước Boost:**', embeds: [embed] });
         }
     } catch (err) {
-        console.error('Lỗi khi chạy lệnh:', err);
-        await interaction.editReply({ content: '❌ Có lỗi xảy ra khi lưu vào Database!' });
+        console.error('Lỗi khi thực hiện lệnh:', err);
+        await interaction.editReply({ content: '❌ Có lỗi xảy ra khi cập nhật Database!' });
     }
 });
 
@@ -207,10 +215,10 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     }
 });
 
-// Quy trình khởi động chuẩn
+// 5. Khởi chạy
 async function start() {
-    if (!MONGO_URI) return console.error('❌ Thiếu biến MONGO_URI!');
-    if (!BOT_TOKEN) return console.error('❌ Thiếu biến DISCORD_TOKEN!');
+    if (!MONGO_URI) return console.error('❌ Thiếu MONGO_URI!');
+    if (!BOT_TOKEN) return console.error('❌ Thiếu DISCORD_TOKEN!');
 
     try {
         console.log('⏳ Đang kết nối MongoDB...');
@@ -222,7 +230,7 @@ async function start() {
             const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
             try {
                 await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-                console.log('✅ Đã đăng ký thành công Slash Commands!');
+                console.log('✅ Đã đăng ký Slash Commands thành công!');
             } catch (err) {
                 console.error('Lỗi đăng ký Slash Commands:', err);
             }

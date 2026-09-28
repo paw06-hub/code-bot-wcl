@@ -2,7 +2,7 @@ const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Rout
 const mongoose = require('mongoose');
 const http = require('http');
 
-// 1. Mở Port Web Server cho Render không bị ngắt Service
+// 1. Mở Port Web Server cho Render[span_0](start_span)[span_0](end_span)
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -25,13 +25,18 @@ const client = new Client({
     ]
 });
 
-// 2. Schema Database
+// 2. Schema Database (Đã thêm cấu hình welcome2)
 const configSchema = new mongoose.Schema({
     guildId: { type: String, required: true, unique: true },
     welcome: {
         channelId: String,
         gifUrl: String,
         message: { type: String, default: '**Chào mừng {user} đã đến với server!**\n\n• Kiểm tra thông tin kênh nhé!' }
+    },
+    welcome2: {
+        channelId: String,
+        gifUrl: String,
+        message: { type: String, default: '**Chào mừng {user} đến với khu vực 2!**' }
     },
     goodbye: {
         channelId: String,
@@ -65,9 +70,16 @@ async function getConfig(guildId) {
 const commands = [
     new SlashCommandBuilder()
         .setName('set-welcome')
-        .setDescription('👑 [Owner Only] Cài đặt Welcome')
+        .setDescription('👑 [Owner Only] Cài đặt Welcome chính')
         .addChannelOption(opt => opt.setName('channel').setDescription('Kênh gửi Welcome').setRequired(true))
         .addStringOption(opt => opt.setName('gif').setDescription('Link GIF Welcome').setRequired(true))
+        .addStringOption(opt => opt.setName('message').setDescription('Nội dung ({user})').setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('set-welcome2')
+        .setDescription('👑 [Owner Only] Cài đặt Welcome thứ 2 (Tùy ý)')
+        .addChannelOption(opt => opt.setName('channel').setDescription('Kênh gửi Welcome 2').setRequired(true))
+        .addStringOption(opt => opt.setName('gif').setDescription('Link GIF Welcome 2').setRequired(true))
         .addStringOption(opt => opt.setName('message').setDescription('Nội dung ({user})').setRequired(false)),
 
     new SlashCommandBuilder()
@@ -86,7 +98,11 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('test-welcome')
-        .setDescription('👑 [Owner Only] Xem trước tin nhắn Welcome'),
+        .setDescription('👑 [Owner Only] Xem trước tin nhắn Welcome chính'),
+
+    new SlashCommandBuilder()
+        .setName('test-welcome2')
+        .setDescription('👑 [Owner Only] Xem trước tin nhắn Welcome thứ 2'),
 
     new SlashCommandBuilder()
         .setName('test-goodbye')
@@ -113,7 +129,7 @@ function createEmbed(text, gifUrl, member, color = '#2B2D31') {
         .setImage(gifUrl || null);
 }
 
-// 4. Xử lý Interaction (Dùng MessageFlags.Ephemeral chuẩn discord.js v14 mới nhất)
+// 4. Xử lý Interaction[span_1](start_span)[span_1](end_span)
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -136,7 +152,15 @@ client.on('interactionCreate', async (interaction) => {
             db.welcome.gifUrl = options.getString('gif');
             if (options.getString('message')) db.welcome.message = options.getString('message');
             await db.save();
-            await interaction.editReply({ content: `✅ Đã lưu cài đặt Welcome vĩnh viễn tại <#${db.welcome.channelId}>!` });
+            await interaction.editReply({ content: `✅ Đã lưu cài đặt Welcome chính tại <#${db.welcome.channelId}>!` });
+        }
+
+        else if (commandName === 'set-welcome2') {
+            db.welcome2.channelId = options.getChannel('channel').id;
+            db.welcome2.gifUrl = options.getString('gif');
+            if (options.getString('message')) db.welcome2.message = options.getString('message');
+            await db.save();
+            await interaction.editReply({ content: `✅ Đã lưu cài đặt Welcome thứ 2 tại <#${db.welcome2.channelId}>!` });
         }
 
         else if (commandName === 'set-goodbye') {
@@ -144,7 +168,7 @@ client.on('interactionCreate', async (interaction) => {
             db.goodbye.gifUrl = options.getString('gif');
             if (options.getString('message')) db.goodbye.message = options.getString('message');
             await db.save();
-            await interaction.editReply({ content: `✅ Đã lưu cài đặt Goodbye vĩnh viễn tại <#${db.goodbye.channelId}>!` });
+            await interaction.editReply({ content: `✅ Đã lưu cài đặt Goodbye tại <#${db.goodbye.channelId}>!` });
         }
 
         else if (commandName === 'set-boost') {
@@ -152,13 +176,19 @@ client.on('interactionCreate', async (interaction) => {
             db.boost.gifUrl = options.getString('gif');
             if (options.getString('message')) db.boost.message = options.getString('message');
             await db.save();
-            await interaction.editReply({ content: `✅ Đã lưu cài đặt Boost vĩnh viễn tại <#${db.boost.channelId}>!` });
+            await interaction.editReply({ content: `✅ Đã lưu cài đặt Boost tại <#${db.boost.channelId}>!` });
         }
 
         else if (commandName === 'test-welcome') {
             if (!db.welcome.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-welcome` trước!' });
             const embed = createEmbed(db.welcome.message, db.welcome.gifUrl, member);
-            await interaction.editReply({ content: '🧪 **Bản xem trước Welcome:**', embeds: [embed] });
+            await interaction.editReply({ content: '🧪 **Bản xem trước Welcome 1:**', embeds: [embed] });
+        }
+
+        else if (commandName === 'test-welcome2') {
+            if (!db.welcome2.gifUrl) return interaction.editReply({ content: '❌ Hãy cài `/set-welcome2` trước!' });
+            const embed = createEmbed(db.welcome2.message, db.welcome2.gifUrl, member);
+            await interaction.editReply({ content: '🧪 **Bản xem trước Welcome 2:**', embeds: [embed] });
         }
 
         else if (commandName === 'test-goodbye') {
@@ -178,15 +208,28 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// Auto Events
+// Auto Events (Gửi đồng thời cả Welcome 1 và Welcome 2 khi có thành viên mới vào)
 client.on('guildMemberAdd', async (member) => {
     const db = await getConfig(member.guild.id);
-    if (!db || !db.welcome.channelId) return;
-    const channel = member.guild.channels.cache.get(db.welcome.channelId);
-    if (!channel) return;
+    if (!db) return;
 
-    const embed = createEmbed(db.welcome.message, db.welcome.gifUrl, member);
-    await channel.send({ embeds: [embed] });
+    // Gửi Welcome chính
+    if (db.welcome && db.welcome.channelId) {
+        const channel1 = member.guild.channels.cache.get(db.welcome.channelId);
+        if (channel1) {
+            const embed1 = createEmbed(db.welcome.message, db.welcome.gifUrl, member);
+            await channel1.send({ embeds: [embed1] });
+        }
+    }
+
+    // Gửi Welcome phụ (Welcome 2)
+    if (db.welcome2 && db.welcome2.channelId) {
+        const channel2 = member.guild.channels.cache.get(db.welcome2.channelId);
+        if (channel2) {
+            const embed2 = createEmbed(db.welcome2.message, db.welcome2.gifUrl, member);
+            await channel2.send({ embeds: [embed2] });
+        }
+    }
 });
 
 client.on('guildMemberRemove', async (member) => {

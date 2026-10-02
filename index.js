@@ -110,7 +110,14 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('test-boost')
-        .setDescription('👑 [Owner Only] Xem trước tin nhắn Boost Server')
+        .setDescription('👑 [Owner Only] Xem trước tin nhắn Boost Server'),
+
+    // Lệnh chat mới thêm vào
+    new SlashCommandBuilder()
+        .setName('chat')
+        .setDescription('👑 [Owner Only] Dùng bot để gửi tin nhắn vào kênh')
+        .addStringOption(opt => opt.setName('message').setDescription('Nội dung tin nhắn bot gửi').setRequired(true))
+        .addChannelOption(opt => opt.setName('channel').setDescription('Kênh muốn bot chat (Mặc định là kênh hiện tại)').setRequired(false))
 ];
 
 function createEmbed(text, gifUrl, member, color = '#2B2D31') {
@@ -138,13 +145,16 @@ function createEmbed(text, gifUrl, member, color = '#2B2D31') {
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
     if (OWNER_ID && interaction.user.id !== OWNER_ID) {
-        return interaction.editReply({ content: '❌ Lệnh này chỉ dành riêng cho **Chủ Bot**!' });
+        await interaction.reply({ content: '❌ Lệnh này chỉ dành riêng cho **Chủ Bot**!', flags: MessageFlags.Ephemeral });
+        return;
     }
 
-    const { commandName, options, member, guildId } = interaction;
+    const { commandName, options, member, guildId, channel } = interaction;
+
+    // Riêng lệnh chat cho phép phản hồi nhanh hoặc công khai tùy bạn, ở đây dùng Ephemeral để báo thành công riêng cho Owner
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const db = await getConfig(guildId);
 
     if (!db) {
@@ -207,9 +217,23 @@ client.on('interactionCreate', async (interaction) => {
             const embed = createEmbed(db.boost.message, db.boost.gifUrl, member, '#F47FFF');
             await interaction.editReply({ content: '🧪 **Bản xem trước Boost:**', embeds: [embed] });
         }
+
+        // Xử lý lệnh /chat
+        else if (commandName === 'chat') {
+            const messageText = options.getString('message');
+            const targetChannel = options.getChannel('channel') || channel;
+
+            // Kiểm tra xem bot có quyền gửi tin nhắn vào kênh đó không
+            if (!targetChannel.isTextBased()) {
+                return interaction.editReply({ content: '❌ Kênh bạn chọn không phải là kênh văn bản!' });
+            }
+
+            await targetChannel.send({ content: messageText });
+            await interaction.editReply({ content: `✅ Đã gửi tin nhắn thành công vào <#${targetChannel.id}>!` });
+        }
     } catch (err) {
         console.error('Lỗi khi thực hiện lệnh:', err);
-        await interaction.editReply({ content: '❌ Có lỗi xảy ra khi cập nhật Database!' });
+        await interaction.editReply({ content: '❌ Có lỗi xảy ra khi thực thi lệnh!' });
     }
 });
 
